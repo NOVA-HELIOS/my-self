@@ -1,0 +1,126 @@
+#include <WiFi.h>
+#include <WebServer.h>
+
+const char* ssid = "vivo V27";
+const char* password = "12345670";
+
+// Pins
+#define RELAY1_PIN   5
+#define RELAY2_PIN   4
+#define SWITCH1_PIN 18
+#define SWITCH2_PIN 19
+
+WebServer server(80);
+
+bool relay1State = false;
+bool relay2State = false;
+
+bool lastSwitch1State = HIGH;
+bool lastSwitch2State = HIGH;
+
+// ================= Relay Control =================
+void setRelay1(bool state) {
+  relay1State = state;
+  digitalWrite(RELAY1_PIN, relay1State ? HIGH : LOW);
+  Serial.println("Relay 1 -> " + String(relay1State ? "ON" : "OFF"));
+}
+
+void setRelay2(bool state) {
+  relay2State = state;
+  digitalWrite(RELAY2_PIN, relay2State ? HIGH : LOW);
+  Serial.println("Relay 2 -> " + String(relay2State ? "ON" : "OFF"));
+}
+
+// ================= Web Page =================
+String getHTML() {
+  String html = "<!DOCTYPE html><html><head><title>ESP32 Dual Relay</title>";
+  html += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
+  html += "<style>body{font-family:Arial;text-align:center;}button{padding:15px 30px;font-size:20px;margin:10px;}</style>";
+
+  html += "<script>";
+  html += "function updateStatus(){fetch('/status').then(r=>r.json()).then(d=>{";
+  html += "document.getElementById('relay1').innerHTML = d.relay1 ? 'ON' : 'OFF';";
+  html += "document.getElementById('relay2').innerHTML = d.relay2 ? 'ON' : 'OFF';";
+  html += "});}";
+  html += "setInterval(updateStatus, 1000);";
+  html += "window.onload = updateStatus;";
+  html += "</script>";
+
+  html += "</head><body><h2>ESP32 Dual Relay (Wall Switch + Web)</h2>";
+  html += "<p>Relay 1: <b id='relay1'>...</b></p>";
+  html += "<a href='/on1'><button>Relay 1 ON</button></a>";
+  html += "<a href='/off1'><button>Relay 1 OFF</button></a>";
+
+  html += "<p>Relay 2: <b id='relay2'>...</b></p>";
+  html += "<a href='/on2'><button>Relay 2 ON</button></a>";
+  html += "<a href='/off2'><button>Relay 2 OFF</button></a>";
+
+  html += "</body></html>";
+  return html;
+}
+
+// ================= Handlers =================
+void handleRoot() { server.send(200, "text/html", getHTML()); }
+void handleOn1()  { setRelay1(true);  server.send(200, "text/html", getHTML()); }
+void handleOff1() { setRelay1(false); server.send(200, "text/html", getHTML()); }
+void handleOn2()  { setRelay2(true);  server.send(200, "text/html", getHTML()); }
+void handleOff2() { setRelay2(false); server.send(200, "text/html", getHTML()); }
+
+void handleStatus() {
+  String json = "{\"relay1\":";
+  json += relay1State ? "true" : "false";
+  json += ",\"relay2\":";
+  json += relay2State ? "true" : "false";
+  json += "}";
+  server.send(200, "application/json", json);
+}
+
+// ================= Setup =================
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(RELAY1_PIN, OUTPUT);
+  pinMode(RELAY2_PIN, OUTPUT);
+  pinMode(SWITCH1_PIN, INPUT_PULLUP);
+  pinMode(SWITCH2_PIN, INPUT_PULLUP);
+
+  setRelay1(false);
+  setRelay2(false);
+
+  WiFi.begin(ssid, password);
+  Serial.print("Connecting to WiFi...");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500); Serial.print(".");
+  }
+  Serial.println("\n✅ WiFi Connected!");
+  Serial.println(WiFi.localIP());
+
+  server.on("/", handleRoot);
+  server.on("/on1", handleOn1);
+  server.on("/off1", handleOff1);
+  server.on("/on2", handleOn2);
+  server.on("/off2", handleOff2);
+  server.on("/status", handleStatus);
+  server.begin();
+}
+
+// ================= Loop =================
+void loop() {
+  server.handleClient();
+
+  // Edge detection for wall switches
+  bool switch1State = digitalRead(SWITCH1_PIN);
+  if (switch1State != lastSwitch1State) {
+    // Switch flipped
+    setRelay1(switch1State == LOW);  // ON = LOW
+    lastSwitch1State = switch1State;
+    delay(50); // debounce
+  }
+
+  bool switch2State = digitalRead(SWITCH2_PIN);
+  if (switch2State != lastSwitch2State) {
+    setRelay2(switch2State == LOW);
+    lastSwitch2State = switch2State;
+    delay(50); // debounce
+  }
+}
